@@ -70,6 +70,129 @@ fn default_user(db: &hl_core::db::Db) -> Result<String> {
     anyhow::bail!("no default account configured. Run: hl account add (and optionally hl account set-default)");
 }
 
+fn parse_pct(s: &str) -> Result<Option<f64>> {
+    let st = s.trim();
+    if !st.ends_with('%') {
+        return Ok(None);
+    }
+    let inner = st[..st.len() - 1].trim();
+    let v: f64 = inner.parse().with_context(|| format!("parse percent '{s}'"))?;
+    Ok(Some(v / 100.0))
+}
+
+async fn position_for_coin(info: &hl_core::info::InfoClient, user: &str, coin: &str) -> Result<(f64, f64, Option<f64>, Option<f64>)> {
+    // Returns: (szi, entryPx, leverage, liquidationPx)
+    let st = info.clearinghouse_state(user).await?;
+    let positions = st
+        .get("assetPositions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for ap in positions {
+        let p = ap.get("position").unwrap_or(&ap);
+        let c = p.get("coin").and_then(|v| v.as_str()).unwrap_or("");
+        if !c.eq_ignore_ascii_case(coin) {
+            continue;
+        }
+        let szi = p.get("szi").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
+        let entry = p.get("entryPx").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
+        let lev = p.get("leverage").and_then(|v| v.get("value")).and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok());
+        let liq = p.get("liquidationPx").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok());
+        return Ok((szi, entry, lev, liq));
+    }
+
+    anyhow::bail!("no open position for {coin}");
+}
+
+async fn trigger_helper(
+    info: &hl_core::info::InfoClient,
+    ex: &hl_core::exchange::ExchangeClient,
+    user: &str,
+    testnet: bool,
+    json: bool,
+    is_stop_loss: bool,
+    coin: &str,
+    trigger_s: &str,
+    ref_s: &str,
+    size_opt: Option<&str>,
+    limit_opt: Option<&str>,
+    reduce_only: bool,
+) -> Result<()> {
+    let meta = meta_for_coin(info, coin).await?;
+
+    let (pos_szi, entry_px, _lev, _liq) = position_for_coin(info, user, coin).await?;
+    let side_is_buy = if pos_szi > 0.0 {
+        // long position -> exits are sells
+        false
+    } else if pos_szi < 0.0 {
+        // short position -> exits are buys
+        true
+    } else {
+        anyhow::bail!("position size is 0 for {coin}");
+    };
+
+    let sz = if let Some(sz_s) = size_opt {
+        parse_f64(sz_s, "size")?
+    } else {
+        pos_szi.abs()
+    };
+
+    // Determine reference price for relative triggers
+    let trigger_px = if let Some(pct) = parse_pct(trigger_s)? {
+        let base = match ref_s.to_lowercase().as_str() {
+            "entry" => entry_px,
+            "mark" => mid_price(info, coin).await?,
+            other => anyhow::bail!("invalid --ref '{other}' (use entry|mark)"),
+        };
+        base * (1.0 + pct)
+    } else {
+        parse_f64(trigger_s, "trigger")?
+    };
+
+    let limit_px = if let Some(lim) = limit_opt {
+        if let Some(pct) = parse_pct(lim)? {
+            let base = match ref_s.to_lowercase().as_str() {
+                "entry" => entry_px,
+                "mark" => mid_price(info, coin).await?,
+                _ => entry_px,
+            };
+            base * (1.0 + pct)
+        } else {
+            parse_f64(lim, "limit")?
+        }
+    } else {
+        trigger_px
+    };
+
+    let tpsl = if is_stop_loss { "sl" } else { "tp" };
+
+    let order = serde_json::json!({
+        "a": meta.asset,
+        "b": side_is_buy,
+        "p": hl_core::exchange::float_to_wire(limit_px)?,
+        "s": hl_core::exchange::float_to_wire(sz)?,
+        "r": reduce_only,
+        "t": {"trigger": {"isMarket": false, "triggerPx": hl_core::exchange::float_to_wire(trigger_px)?, "tpsl": tpsl}},
+    });
+
+    let action = serde_json::json!({
+        "type": "order",
+        "orders": [order],
+        "grouping": "na",
+    });
+
+    let nonce = hl_core::exchange::now_ms();
+    let resp = ex.post_action(&action, nonce).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    }
+
+    Ok(())
+}
+
 pub async fn trade(cmd: TradeCmd, json: bool, testnet: bool, db: &mut hl_core::db::Db, info: &hl_core::info::InfoClient) -> Result<()> {
     // Trading always uses the default account (or error).
     let user = default_user(db)?;
@@ -90,6 +213,40 @@ pub async fn trade(cmd: TradeCmd, json: bool, testnet: bool, db: &mut hl_core::d
     };
 
     match cmd {
+        TradeCmd::SlTrigger { coin, trigger, r#ref, size, limit, reduce_only } => {
+            return trigger_helper(
+                info,
+                &ex,
+                &user,
+                testnet,
+                json,
+                true,
+                &coin,
+                &trigger,
+                &r#ref,
+                size.as_deref(),
+                limit.as_deref(),
+                reduce_only,
+            )
+            .await;
+        }
+        TradeCmd::TpTrigger { coin, trigger, r#ref, size, limit, reduce_only } => {
+            return trigger_helper(
+                info,
+                &ex,
+                &user,
+                testnet,
+                json,
+                false,
+                &coin,
+                &trigger,
+                &r#ref,
+                size.as_deref(),
+                limit.as_deref(),
+                reduce_only,
+            )
+            .await;
+        }
         TradeCmd::Order(order_cmd) => match order_cmd {
             OrderCmd::Ls => {
                 let orders = info.open_orders(&user).await?;
