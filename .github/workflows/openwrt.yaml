@@ -1,0 +1,47 @@
+name: openwrt
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  openwrt-aarch64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (OpenWrt aarch64 musl)
+        run: cross build --release --target aarch64-unknown-linux-musl
+
+      - name: Package hl-openwrt.tar.gz
+        run: |
+          set -eux
+          mkdir -p dist
+          cp target/aarch64-unknown-linux-musl/release/hl dist/hl
+          (cd dist && tar -czf hl-openwrt.tar.gz hl)
+
+      - name: Upload artifact (CI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hl-openwrt
+          path: dist/hl-openwrt.tar.gz
+
+      - name: Upload to GitHub Release (when release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/hl-openwrt.tar.gz
