@@ -116,11 +116,11 @@ pub async fn run_table(mut rx: mpsc::Receiver<TableView>) -> Result<()> {
                     }
                 }
             }
-            v = rx.recv() => {
-                if v.is_none() {
+            maybe_view = rx.recv() => {
+                if maybe_view.is_none() {
                     break Ok(());
                 }
-                latest = v;
+                latest = maybe_view;
             }
         }
     };
