@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/hl",
+  "crates/core",
+  "crates/tui",
+  "crates/server",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+dirs = "5"
+hex = "0.4"
+rpassword = "7"
+tiny-keccak = { version = "2", features = ["keccak"] }
+rmpv = "1"
+
+# Ethereum signing + EIP-712 typed data
+ethers-core = { version = "2", default-features = false, features = ["eip712"] }
+ethers-signers = { version = "2", default-features = false, features = ["keystore"] }
+
+# TUI stack (for Ink-like watch modes)
+ratatui = "0.29"
+crossterm = "0.28"
+
+# WebSocket
+futures = "0.3"
+tokio-tungstenite = { version = "0.23", features = ["rustls-tls-webpki-roots"] }
+url = "2"
+
+# NOTE: hypersdk is reference-only per user request; not included as a dependency.
