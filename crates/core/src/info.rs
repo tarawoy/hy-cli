@@ -60,13 +60,44 @@ impl InfoClient {
             .await
     }
 
-    pub async fn user_state(&self, user: &str) -> Result<Value> {
-        self.info(&serde_json::json!({"type": "userState", "user": user}))
+    pub async fn clearinghouse_state(&self, user: &str) -> Result<Value> {
+        self.info(&serde_json::json!({"type": "clearinghouseState", "user": user}))
+            .await
+    }
+
+    pub async fn spot_clearinghouse_state(&self, user: &str) -> Result<Value> {
+        self.info(&serde_json::json!({"type": "spotClearinghouseState", "user": user}))
+            .await
+    }
+
+    pub async fn portfolio(&self, user: &str) -> Result<Value> {
+        self.info(&serde_json::json!({"type": "portfolio", "user": user}))
             .await
     }
 
     pub async fn open_orders(&self, user: &str) -> Result<Value> {
         self.info(&serde_json::json!({"type": "openOrders", "user": user}))
             .await
+    }
+
+    /// Compatibility helper: build a Project-A-like `userState` object by combining
+    /// `clearinghouseState` + `spotClearinghouseState`.
+    ///
+    /// Note: Hyperliquid no longer accepts {type:"userState"} on /info.
+    pub async fn user_state_compat(&self, user: &str) -> Result<Value> {
+        let perp = self.clearinghouse_state(user).await?;
+        let spot = self.spot_clearinghouse_state(user).await?;
+
+        let spot_state = serde_json::json!({
+            "balances": spot.get("balances").cloned().unwrap_or(Value::Null),
+            "equity": spot.get("equity").cloned().unwrap_or(Value::Null),
+        });
+
+        Ok(serde_json::json!({
+            "marginSummary": perp.get("marginSummary").cloned().unwrap_or(Value::Null),
+            "assetPositions": perp.get("assetPositions").cloned().unwrap_or(Value::Null),
+            "withdrawable": perp.get("withdrawable").cloned().unwrap_or(Value::Null),
+            "spotState": spot_state,
+        }))
     }
 }
