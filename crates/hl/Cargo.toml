@@ -20,6 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 ratatui.workspace = true
+chrono.workspace = true
 
 hl-core = { path = "../core" }
 hl-tui = { path = "../tui" }
