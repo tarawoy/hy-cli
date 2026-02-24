@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use chrono::{Local, TimeZone};
+use serde_json::Value;
 
 #[derive(Parser, Debug)]
 #[command(name = "hl", version, about = "Hyperliquid CLI (Rust rewrite)")]
@@ -252,21 +254,12 @@ async fn asset(cmd: AssetCmd, json: bool, testnet: bool, info: &hl_core::info::I
             if let Some(levels) = levels {
                 let bids = levels.get(0).and_then(|v| v.as_array()).cloned().unwrap_or_default();
                 let asks = levels.get(1).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
                 println!("{coin} book:");
-                println!("  bids:");
-                for lvl in bids.iter().take(10) {
-                    let px = lvl.get(0).and_then(|v| v.as_str()).unwrap_or("?");
-                    let sz = lvl.get(1).and_then(|v| v.as_str()).unwrap_or("?");
-                    println!("    {px:>12}  {sz}");
-                }
-                println!("  asks:");
-                for lvl in asks.iter().take(10) {
-                    let px = lvl.get(0).and_then(|v| v.as_str()).unwrap_or("?");
-                    let sz = lvl.get(1).and_then(|v| v.as_str()).unwrap_or("?");
-                    println!("    {px:>12}  {sz}");
-                }
+                let t = render_l2_book_table(&bids, &asks, 10)?;
+                print!("{t}");
             } else {
-                // Fallback: dump raw json as compact.
+                // Fallback: dump raw json.
                 println!("{}", serde_json::to_string_pretty(&book)?);
             }
             Ok(())
@@ -412,27 +405,74 @@ async fn account(
 
             // Spot balances
             if let Some(bals) = spot.get("balances").and_then(|v| v.as_array()) {
-                println!("Spot balances:");
+                let mut rows: Vec<Vec<String>> = vec![];
                 for b in bals {
                     let coin = b.get("coin").and_then(|v| v.as_str()).unwrap_or("?");
                     let total = b.get("total").and_then(|v| v.as_str()).unwrap_or("?");
                     let hold = b.get("hold").and_then(|v| v.as_str()).unwrap_or("?");
-                    println!("  {coin:>8}  total={total}  hold={hold}");
+
+                    let avail = match (crate::format::parse_f64(total), crate::format::parse_f64(hold)) {
+                        (Some(t), Some(h)) => crate::format::fmt_fixed_with_commas(t - h, 4),
+                        _ => "?".into(),
+                    };
+
+                    rows.push(vec![
+                        coin.to_string(),
+                        crate::format::fmt_num_str(total, 4),
+                        crate::format::fmt_num_str(hold, 4),
+                        avail,
+                    ]);
+                }
+
+                println!("Spot balances:");
+                if rows.is_empty() {
+                    println!("(none)");
+                } else {
+                    let t = crate::format::table(
+                        &["Coin", "Total", "Hold", "Avail"],
+                        &rows,
+                        &[false, true, true, true],
+                    )?;
+                    print!("{t}");
                 }
             } else {
                 println!("Spot balances: (none)");
             }
 
             // Margin summary
+            println!("Margin:");
             if let Some(ms) = perp.get("marginSummary") {
                 let av = ms.get("accountValue").and_then(|v| v.as_str()).unwrap_or("?");
                 let tm = ms.get("totalMarginUsed").and_then(|v| v.as_str()).unwrap_or("?");
                 let ntl = ms.get("totalNtlPos").and_then(|v| v.as_str()).unwrap_or("?");
-                println!("Margin: accountValue={av}  totalMarginUsed={tm}  totalNtlPos={ntl}");
+                let mut rows = vec![
+                    vec!["AccountValue".into(), crate::format::fmt_num_str(av, 2)],
+                    vec!["MarginUsed".into(), crate::format::fmt_num_str(tm, 2)],
+                    vec!["NtlPos".into(), crate::format::fmt_num_str(ntl, 2)],
+                ];
+                if let Some(w) = perp.get("withdrawable").and_then(|v| v.as_str()) {
+                    rows.push(vec!["Withdrawable".into(), crate::format::fmt_num_str(w, 2)]);
+                }
+                let t = crate::format::table(&["Field", "Value"], &rows, &[false, true])?;
+                print!("{t}");
+            } else {
+                println!("(no marginSummary)");
+                if let Some(w) = perp.get("withdrawable").and_then(|v| v.as_str()) {
+                    println!("Withdrawable: {}", crate::format::fmt_num_str(w, 2));
+                }
             }
-            if let Some(w) = perp.get("withdrawable").and_then(|v| v.as_str()) {
-                println!("Withdrawable: {w}");
+
+            // Positions (Project A-style table)
+            let positions = perp
+                .get("assetPositions")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            if !positions.is_empty() {
+                println!("Positions:");
+                print!("{}", render_positions_table(&positions)?);
             }
+
             Ok(())
         }
         AccountCmd::Positions { user, watch } => {
@@ -465,15 +505,7 @@ async fn account(
                 println!("No positions");
                 return Ok(());
             }
-            for ap in positions {
-                let p = ap.get("position").unwrap_or(&ap);
-                let coin = p.get("coin").and_then(|v| v.as_str()).unwrap_or("?");
-                let szi = p.get("szi").and_then(|v| v.as_str()).unwrap_or("?");
-                let entry = p.get("entryPx").and_then(|v| v.as_str()).unwrap_or("?");
-                let upnl = p.get("unrealizedPnl").and_then(|v| v.as_str()).unwrap_or("?");
-                let lev = p.get("leverage").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("?");
-                println!("{coin:>8}  szi={szi:>10}  entry={entry:>12}  uPnL={upnl:>12}  lev={lev}");
-            }
+            print!("{}", render_positions_table(&positions)?);
             Ok(())
         }
         AccountCmd::Orders { user, watch } => {
@@ -491,14 +523,9 @@ async fn account(
                 println!("No open orders");
                 return Ok(());
             }
-            for o in arr {
-                let coin = o.get("coin").and_then(|v| v.as_str()).unwrap_or("?");
-                let side = o.get("side").and_then(|v| v.as_str()).unwrap_or("?");
-                let sz = o.get("sz").and_then(|v| v.as_str()).unwrap_or("?");
-                let px = o.get("limitPx").and_then(|v| v.as_str()).unwrap_or("?");
-                let oid = o.get("oid").map(|v| v.to_string()).unwrap_or_else(|| "?".into());
-                println!("{coin:>8}  {side:>4}  sz={sz:>10}  px={px:>12}  oid={oid}");
-            }
+
+            let t = render_orders_table(&arr)?;
+            print!("{t}");
             Ok(())
         }
         AccountCmd::Portfolio { user, watch } => {
@@ -551,6 +578,144 @@ async fn account(
             Ok(())
         }
     }
+}
+
+fn render_positions_table(positions: &[Value]) -> Result<String> {
+    let mut rows: Vec<Vec<String>> = vec![];
+
+    for ap in positions {
+        let p = ap.get("position").unwrap_or(ap);
+        let coin = p.get("coin").and_then(|v| v.as_str()).unwrap_or("?");
+        let szi_raw = p.get("szi").and_then(|v| v.as_str()).unwrap_or("?").trim();
+
+        let (side, size_raw) = if let Some(rest) = szi_raw.strip_prefix('-') {
+            ("Short", rest.to_string())
+        } else {
+            ("Long", szi_raw.to_string())
+        };
+
+        let entry = p.get("entryPx").and_then(|v| v.as_str()).unwrap_or("?");
+        let upnl = p.get("unrealizedPnl").and_then(|v| v.as_str()).unwrap_or("?");
+        let lev = p
+            .get("leverage")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let liq = p.get("liquidationPx").and_then(|v| v.as_str()).unwrap_or("-");
+
+        let lev_s = match crate::format::parse_f64(lev) {
+            Some(v) => format!("{}x", crate::format::fmt_fixed_with_commas(v, 2)),
+            None => lev.to_string(),
+        };
+
+        rows.push(vec![
+            coin.to_string(),
+            side.to_string(),
+            size_raw, // keep size raw
+            crate::format::fmt_num_str(entry, 4),
+            crate::format::fmt_num_str(upnl, 2),
+            lev_s,
+            if liq == "-" { "-".into() } else { crate::format::fmt_num_str(liq, 4) },
+        ]);
+    }
+
+    crate::format::table(
+        &["Coin", "Side", "Size", "Entry", "uPnL", "Leverage", "Liq"],
+        &rows,
+        &[false, false, true, true, true, true, true],
+    )
+}
+
+fn render_orders_table(orders: &[Value]) -> Result<String> {
+    let mut rows: Vec<Vec<String>> = vec![];
+
+    for o in orders {
+        let coin = o.get("coin").and_then(|v| v.as_str()).unwrap_or("?");
+        let side = o.get("side").and_then(|v| v.as_str()).unwrap_or("?");
+        let sz = o.get("sz").and_then(|v| v.as_str()).unwrap_or("?");
+        let px = o.get("limitPx").and_then(|v| v.as_str()).unwrap_or("?");
+
+        // Use local device time for timestamps when available.
+        let time_s = match o.get("timestamp") {
+            Some(Value::Number(n)) => n.as_i64().map(fmt_local_ts_ms),
+            Some(Value::String(s)) => s.parse::<i64>().ok().map(fmt_local_ts_ms),
+            _ => None,
+        }
+        .unwrap_or_else(|| "-".into());
+
+        let oid = match o.get("oid") {
+            Some(Value::String(s)) => s.clone(),
+            Some(v) => v.to_string(),
+            None => "?".into(),
+        };
+
+        rows.push(vec![
+            time_s,
+            coin.to_string(),
+            side.to_string(),
+            sz.to_string(), // keep size raw
+            crate::format::fmt_num_str(px, 4),
+            oid,
+        ]);
+    }
+
+    crate::format::table(
+        &["Time", "Coin", "Side", "Size", "Price", "OID"],
+        &rows,
+        &[false, false, false, true, true, false],
+    )
+}
+
+fn fmt_local_ts_ms(ts_ms: i64) -> String {
+    // HL uses ms epoch.
+    match Local.timestamp_millis_opt(ts_ms).single() {
+        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+        None => "-".into(),
+    }
+}
+
+fn render_l2_book_table(bids: &[Value], asks: &[Value], depth: usize) -> Result<String> {
+    let mut rows: Vec<Vec<String>> = vec![];
+    let n = depth.max(1);
+
+    for i in 0..n {
+        let (bid_px, bid_sz) = bids
+            .get(i)
+            .and_then(|lvl| lvl.as_array())
+            .and_then(|a| Some((a.get(0), a.get(1))))
+            .map(|(px, sz)| {
+                (
+                    px.and_then(|v| v.as_str()).unwrap_or(""),
+                    sz.and_then(|v| v.as_str()).unwrap_or(""),
+                )
+            })
+            .unwrap_or(("", ""));
+
+        let (ask_px, ask_sz) = asks
+            .get(i)
+            .and_then(|lvl| lvl.as_array())
+            .and_then(|a| Some((a.get(0), a.get(1))))
+            .map(|(px, sz)| {
+                (
+                    px.and_then(|v| v.as_str()).unwrap_or(""),
+                    sz.and_then(|v| v.as_str()).unwrap_or(""),
+                )
+            })
+            .unwrap_or(("", ""));
+
+        rows.push(vec![
+            if bid_px.is_empty() { "".into() } else { crate::format::fmt_num_str(bid_px, 4) },
+            if bid_sz.is_empty() { "".into() } else { crate::format::fmt_num_str(bid_sz, 4) },
+            if ask_px.is_empty() { "".into() } else { crate::format::fmt_num_str(ask_px, 4) },
+            if ask_sz.is_empty() { "".into() } else { crate::format::fmt_num_str(ask_sz, 4) },
+        ]);
+    }
+
+    crate::format::table(
+        &["BidPx", "BidSz", "AskPx", "AskSz"],
+        &rows,
+        &[true, true, true, true],
+    )
 }
 
 fn resolve_user(user: Option<&str>, db: &hl_core::db::Db) -> Result<String> {
