@@ -165,19 +165,19 @@ fn l1_typed_data(message: Value) -> Result<TypedData> {
     types.insert(
         "EIP712Domain".to_string(),
         vec![
-            ethers_core::types::transaction::eip712::Field {
+            ethers_core::types::transaction::eip712::Eip712DomainType {
                 name: "name".to_string(),
                 r#type: "string".to_string(),
             },
-            ethers_core::types::transaction::eip712::Field {
+            ethers_core::types::transaction::eip712::Eip712DomainType {
                 name: "version".to_string(),
                 r#type: "string".to_string(),
             },
-            ethers_core::types::transaction::eip712::Field {
+            ethers_core::types::transaction::eip712::Eip712DomainType {
                 name: "chainId".to_string(),
                 r#type: "uint256".to_string(),
             },
-            ethers_core::types::transaction::eip712::Field {
+            ethers_core::types::transaction::eip712::Eip712DomainType {
                 name: "verifyingContract".to_string(),
                 r#type: "address".to_string(),
             },
@@ -187,22 +187,30 @@ fn l1_typed_data(message: Value) -> Result<TypedData> {
     types.insert(
         "Agent".to_string(),
         vec![
-            ethers_core::types::transaction::eip712::Field {
+            ethers_core::types::transaction::eip712::Eip712DomainType {
                 name: "source".to_string(),
                 r#type: "string".to_string(),
             },
-            ethers_core::types::transaction::eip712::Field {
+            ethers_core::types::transaction::eip712::Eip712DomainType {
                 name: "connectionId".to_string(),
                 r#type: "bytes32".to_string(),
             },
         ],
     );
 
+    // ethers TypedData expects a map for `message`.
+    let msg_map: std::collections::BTreeMap<String, Value> = match message {
+        Value::Object(m) => m.into_iter().collect(),
+        other => {
+            anyhow::bail!("typed-data message must be an object, got: {other}")
+        }
+    };
+
     Ok(TypedData {
         types,
         primary_type: "Agent".to_string(),
         domain,
-        message,
+        message: msg_map,
     })
 }
 
