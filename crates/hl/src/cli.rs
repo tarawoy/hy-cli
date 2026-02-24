@@ -398,18 +398,20 @@ async fn account(
                 )
                 .await;
             }
-            let st = info.user_state(&user).await?;
+            let perp = info.clearinghouse_state(&user).await?;
+            let spot = info.spot_clearinghouse_state(&user).await?;
+
             if json {
-                println!("{}", serde_json::to_string_pretty(&st)?);
+                let out = serde_json::json!({
+                    "clearinghouseState": perp,
+                    "spotClearinghouseState": spot,
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
                 return Ok(());
             }
 
             // Spot balances
-            if let Some(bals) = st
-                .get("spotState")
-                .and_then(|v| v.get("balances"))
-                .and_then(|v| v.as_array())
-            {
+            if let Some(bals) = spot.get("balances").and_then(|v| v.as_array()) {
                 println!("Spot balances:");
                 for b in bals {
                     let coin = b.get("coin").and_then(|v| v.as_str()).unwrap_or("?");
@@ -422,13 +424,13 @@ async fn account(
             }
 
             // Margin summary
-            if let Some(ms) = st.get("marginSummary") {
+            if let Some(ms) = perp.get("marginSummary") {
                 let av = ms.get("accountValue").and_then(|v| v.as_str()).unwrap_or("?");
                 let tm = ms.get("totalMarginUsed").and_then(|v| v.as_str()).unwrap_or("?");
                 let ntl = ms.get("totalNtlPos").and_then(|v| v.as_str()).unwrap_or("?");
                 println!("Margin: accountValue={av}  totalMarginUsed={tm}  totalNtlPos={ntl}");
             }
-            if let Some(w) = st.get("withdrawable").and_then(|v| v.as_str()) {
+            if let Some(w) = perp.get("withdrawable").and_then(|v| v.as_str()) {
                 println!("Withdrawable: {w}");
             }
             Ok(())
@@ -447,7 +449,7 @@ async fn account(
                 )
                 .await;
             }
-            let st = info.user_state(&user).await?;
+            let st = info.clearinghouse_state(&user).await?;
             let positions = st
                 .get("assetPositions")
                 .and_then(|v| v.as_array())
@@ -513,13 +515,20 @@ async fn account(
                 )
                 .await;
             }
-            let st = info.user_state(&user).await?;
+            let perp = info.clearinghouse_state(&user).await?;
+            let spot = info.spot_clearinghouse_state(&user).await?;
+            let port = info.portfolio(&user).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&st)?);
+                let out = serde_json::json!({
+                    "clearinghouseState": perp,
+                    "spotClearinghouseState": spot,
+                    "portfolio": port,
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
                 return Ok(());
             }
             // Minimal, non-watch portfolio summary.
-            if let Some(ms) = st.get("marginSummary") {
+            if let Some(ms) = perp.get("marginSummary") {
                 println!("Margin summary:");
                 for k in ["accountValue", "totalMarginUsed", "totalNtlPos", "totalRawUsd"] {
                     if let Some(v) = ms.get(k).and_then(|v| v.as_str()) {
@@ -527,13 +536,16 @@ async fn account(
                     }
                 }
             }
-            if let Some(ss) = st.get("spotState") {
-                let ev = ss.get("equity").and_then(|v| v.as_str());
-                if let Some(ev) = ev {
-                    println!("Spot equity: {ev}");
+            if let Some(bals) = spot.get("balances").and_then(|v| v.as_array()) {
+                let coins: Vec<_> = bals
+                    .iter()
+                    .filter_map(|b| b.get("coin").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                    .collect();
+                if !coins.is_empty() {
+                    println!("Spot coins: {}", coins.join(", "));
                 }
             }
-            if let Some(w) = st.get("withdrawable").and_then(|v| v.as_str()) {
+            if let Some(w) = perp.get("withdrawable").and_then(|v| v.as_str()) {
                 println!("Withdrawable: {w}");
             }
             Ok(())
