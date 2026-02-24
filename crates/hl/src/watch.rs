@@ -230,7 +230,7 @@ pub async fn watch_account_webdata(
     }
 
     // initial user state
-    let mut last_state = info.user_state(&user).await.ok();
+    let mut last_state = info.user_state_compat(&user).await.ok();
 
     let (ui_tx, ui_rx) = mpsc::channel(16);
     tokio::spawn(async move {
