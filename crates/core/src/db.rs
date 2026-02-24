@@ -83,7 +83,7 @@ impl Db {
         if make_default {
             tx.execute("UPDATE accounts SET is_default = 0", [])?;
         }
-        tx.execute(
+        let ins = tx.execute(
             "INSERT INTO accounts(alias, address, read_only, is_default, created_at) VALUES(?, ?, ?, ?, ?)",
             params![
                 alias,
@@ -92,9 +92,23 @@ impl Db {
                 if make_default { 1 } else { 0 },
                 now
             ],
-        )?;
-        tx.commit()?;
-        Ok(())
+        );
+        match ins {
+            Ok(_) => {
+                tx.commit()?;
+                Ok(())
+            }
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if err.extended_code == 2067 || err.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                // 2067: SQLITE_CONSTRAINT_UNIQUE
+                Err(anyhow!(
+                    "address already exists in accounts.db: {address}\n\
+                     Run: hl account ls (and optionally: hl account set-default)"
+                ))
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn set_default_by_id(&mut self, id: i64) -> Result<()> {
