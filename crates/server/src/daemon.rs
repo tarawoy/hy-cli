@@ -303,7 +303,7 @@ async fn handle_req(
                 };
                 let data = if data.is_none() {
                     source = "http";
-                    info_http.user_state(&user).await.ok()
+                    info_http.user_state_compat(&user).await.ok()
                 } else {
                     data
                 };
@@ -507,7 +507,7 @@ async fn ensure_sub_user_state(
         );
     }
 
-    if let Ok(s) = info_http.user_state(user).await {
+    if let Ok(s) = info_http.user_state_compat(user).await {
         let mut c = st.cache.write().await;
         c.user_state.insert(user.to_string(), s);
     }
