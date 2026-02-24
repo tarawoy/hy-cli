@@ -276,7 +276,12 @@ async fn asset(cmd: AssetCmd, json: bool, testnet: bool, info: &hl_core::info::I
                 return Ok(());
             }
             match px {
-                Some(px) => println!("{coin} mid={px}"),
+                Some(px) => {
+                    let out = crate::format::parse_f64(&px)
+                        .map(|v| crate::format::fmt_trim_with_commas(v, 4))
+                        .unwrap_or(px);
+                    println!("{coin} mid={out}");
+                }
                 None => anyhow::bail!("coin not found in allMids: {coin}"),
             }
             Ok(())
@@ -699,7 +704,9 @@ fn render_orders_table(orders: &[Value]) -> Result<String> {
             coin.to_string(),
             side.to_string(),
             sz.to_string(), // keep size raw
-            crate::format::fmt_num_str(px, 4),
+            crate::format::parse_f64(px)
+                .map(|v| crate::format::fmt_trim_with_commas(v, 4))
+                .unwrap_or_else(|| px.to_string()),
             oid,
         ]);
     }
@@ -749,9 +756,17 @@ fn render_l2_book_table(bids: &[Value], asks: &[Value], depth: usize) -> Result<
             .unwrap_or(("", ""));
 
         rows.push(vec![
-            if bid_px.is_empty() { "".into() } else { crate::format::fmt_num_str(bid_px, 4) },
+            if bid_px.is_empty() { "".into() } else {
+                crate::format::parse_f64(bid_px)
+                    .map(|v| crate::format::fmt_trim_with_commas(v, 4))
+                    .unwrap_or_else(|| bid_px.to_string())
+            },
             if bid_sz.is_empty() { "".into() } else { crate::format::fmt_num_str(bid_sz, 4) },
-            if ask_px.is_empty() { "".into() } else { crate::format::fmt_num_str(ask_px, 4) },
+            if ask_px.is_empty() { "".into() } else {
+                crate::format::parse_f64(ask_px)
+                    .map(|v| crate::format::fmt_trim_with_commas(v, 4))
+                    .unwrap_or_else(|| ask_px.to_string())
+            },
             if ask_sz.is_empty() { "".into() } else { crate::format::fmt_num_str(ask_sz, 4) },
         ]);
     }
