@@ -13,7 +13,6 @@ permissions:
 jobs:
   openwrt-aarch64:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -24,19 +23,23 @@ jobs:
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build (OpenWrt aarch64 musl)
+      - name: Locate workspace manifest
         run: |
           set -eux
-          # Find the workspace Cargo.toml (some uploads nest the project in a subfolder)
           MANIFEST=$(find . -maxdepth 4 -name Cargo.toml -print0 | xargs -0 -I{} sh -c 'grep -q "^\[workspace\]" "{}" && echo "{}"' | head -n 1)
           test -n "$MANIFEST"
+          echo "MANIFEST=$MANIFEST" >> $GITHUB_ENV
           echo "Using manifest: $MANIFEST"
-          cross build --release --target aarch64-unknown-linux-musl --manifest-path "$MANIFEST"
+
+      - name: Cargo metadata (debug)
+        run: cargo metadata --manifest-path "$MANIFEST" --format-version 1
+
+      - name: Build (OpenWrt aarch64 musl)
+        run: cross -v build --release --target aarch64-unknown-linux-musl --manifest-path "$MANIFEST"
 
       - name: Package hl-openwrt.tar.gz
         run: |
           set -eux
-          MANIFEST=$(find . -maxdepth 4 -name Cargo.toml -print0 | xargs -0 -I{} sh -c 'grep -q "^\[workspace\]" "{}" && echo "{}"' | head -n 1)
           ROOT_DIR=$(dirname "$MANIFEST")
           mkdir -p dist
           cp "$ROOT_DIR/target/aarch64-unknown-linux-musl/release/hl" dist/hl
