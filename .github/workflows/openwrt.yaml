@@ -25,13 +25,21 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build (OpenWrt aarch64 musl)
-        run: cross build --release --target aarch64-unknown-linux-musl
+        run: |
+          set -eux
+          # Find the workspace Cargo.toml (some uploads nest the project in a subfolder)
+          MANIFEST=$(find . -maxdepth 4 -name Cargo.toml -print0 | xargs -0 -I{} sh -c 'grep -q "^\[workspace\]" "{}" && echo "{}"' | head -n 1)
+          test -n "$MANIFEST"
+          echo "Using manifest: $MANIFEST"
+          cross build --release --target aarch64-unknown-linux-musl --manifest-path "$MANIFEST"
 
       - name: Package hl-openwrt.tar.gz
         run: |
           set -eux
+          MANIFEST=$(find . -maxdepth 4 -name Cargo.toml -print0 | xargs -0 -I{} sh -c 'grep -q "^\[workspace\]" "{}" && echo "{}"' | head -n 1)
+          ROOT_DIR=$(dirname "$MANIFEST")
           mkdir -p dist
-          cp target/aarch64-unknown-linux-musl/release/hl dist/hl
+          cp "$ROOT_DIR/target/aarch64-unknown-linux-musl/release/hl" dist/hl
           (cd dist && tar -czf hl-openwrt.tar.gz hl)
 
       - name: Upload artifact (CI)
