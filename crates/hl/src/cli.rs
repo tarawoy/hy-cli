@@ -640,12 +640,12 @@ fn render_positions_table(positions: &[Value]) -> Result<String> {
         let lev = p
             .get("leverage")
             .and_then(|v| v.get("value"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
+            .and_then(|v| v.as_f64().map(|x| x.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
+            .unwrap_or_else(|| "?".to_string());
         let liq = p.get("liquidationPx").and_then(|v| v.as_str()).unwrap_or("-");
 
-        let lev_s = match crate::format::parse_f64(lev) {
-            Some(v) => format!("{}x", crate::format::fmt_fixed_with_commas(v, 2)),
+        let lev_s = match crate::format::parse_f64(&lev) {
+            Some(v) => format!("{}x", crate::format::fmt_trim_with_commas(v, 2)),
             None => lev.to_string(),
         };
 
@@ -653,10 +653,14 @@ fn render_positions_table(positions: &[Value]) -> Result<String> {
             coin.to_string(),
             side.to_string(),
             size_raw, // keep size raw
-            crate::format::fmt_num_str(entry, 4),
+            crate::format::parse_f64(entry).map(|v| crate::format::fmt_trim_with_commas(v, 4)).unwrap_or_else(|| entry.to_string()),
             crate::format::fmt_num_str(upnl, 2),
             lev_s,
-            if liq == "-" { "-".into() } else { crate::format::fmt_num_str(liq, 4) },
+            if liq == "-" { "-".into() } else {
+                crate::format::parse_f64(liq)
+                    .map(|v| crate::format::fmt_trim_with_commas(v, 4))
+                    .unwrap_or_else(|| liq.to_string())
+            },
         ]);
     }
 
