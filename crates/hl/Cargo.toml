@@ -1,0 +1,26 @@
+[package]
+name = "hl"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+description = "Hyperliquid CLI (Rust rewrite of hyperliquid-cli)"
+
+[[bin]]
+name = "hl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+ratatui.workspace = true
+
+hl-core = { path = "../core" }
+hl-tui = { path = "../tui" }
+hl-server = { path = "../server" }
