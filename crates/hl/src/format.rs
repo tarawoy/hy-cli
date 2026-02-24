@@ -61,6 +61,26 @@ pub fn fmt_fixed_with_commas(v: f64, decimals: usize) -> String {
     format!("{sign}{}.{}", commas_i64(int_part), frac_str)
 }
 
+/// Trim trailing zeros from a decimal formatted as 1,234.5000 -> 1,234.5 and 1,234.0000 -> 1,234
+pub fn trim_trailing_zeros_num(s: &str) -> String {
+    if !s.contains('.') {
+        return s.to_string();
+    }
+    let mut out = s.to_string();
+    while out.ends_with('0') {
+        out.pop();
+    }
+    if out.ends_with('.') {
+        out.pop();
+    }
+    out
+}
+
+/// Format number with commas and up to `max_decimals`, trimming trailing zeros.
+pub fn fmt_trim_with_commas(v: f64, max_decimals: usize) -> String {
+    trim_trailing_zeros_num(&fmt_fixed_with_commas(v, max_decimals))
+}
+
 pub fn parse_f64(s: &str) -> Option<f64> {
     let t = s.trim();
     if t.is_empty() {
