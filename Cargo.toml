@@ -30,11 +30,11 @@ rmpv = "1"
 
 # Ethereum signing + EIP-712 typed data
 ethers-core = { version = "2", default-features = false, features = ["eip712"] }
-ethers-signers = { version = "2", default-features = false }
+ethers-signers = { version = "2", default-features = false, features = ["keystore"] }
 
 # TUI stack (for Ink-like watch modes)
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 
 # WebSocket
 futures = "0.3"
