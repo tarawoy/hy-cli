@@ -79,7 +79,8 @@ async fn ws_task(
         }
 
         debug!(url = %ws_url, "ws connecting");
-        let conn = tokio_tungstenite::connect_async(ws_url.clone()).await;
+        // connect_async accepts &str/String/Request; use &str for broad compatibility.
+        let conn = tokio_tungstenite::connect_async(ws_url.as_str()).await;
         let (ws, _resp) = match conn {
             Ok(v) => v,
             Err(e) => {
