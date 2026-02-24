@@ -71,6 +71,47 @@ pub enum AssetCmd {
 pub enum TradeCmd {
     #[command(subcommand)]
     Order(OrderCmd),
+
+    /// Create a stop-loss trigger order (size defaults to 100% of current position if omitted)
+    SlTrigger {
+        coin: String,
+        /// Trigger price (absolute like 63703 or relative like -1.1%)
+        #[arg(long)]
+        trigger: String,
+        /// Reference for relative triggers: entry or mark
+        #[arg(long, default_value = "entry")]
+        r#ref: String,
+        /// Optional size in base units; if omitted uses full current position size
+        #[arg(long)]
+        size: Option<String>,
+        /// Optional limit price; default = trigger
+        #[arg(long)]
+        limit: Option<String>,
+        /// Reduce-only (default true)
+        #[arg(long, default_value_t = true)]
+        reduce_only: bool,
+    },
+
+    /// Create a take-profit trigger order (size defaults to 100% of current position if omitted)
+    TpTrigger {
+        coin: String,
+        /// Trigger price (absolute like 64881 or relative like +1.7%)
+        #[arg(long)]
+        trigger: String,
+        /// Reference for relative triggers: entry or mark
+        #[arg(long, default_value = "entry")]
+        r#ref: String,
+        /// Optional size in base units; if omitted uses full current position size
+        #[arg(long)]
+        size: Option<String>,
+        /// Optional limit price; default = trigger
+        #[arg(long)]
+        limit: Option<String>,
+        /// Reduce-only (default true)
+        #[arg(long, default_value_t = true)]
+        reduce_only: bool,
+    },
+
     Cancel { oid: Option<String> },
     CancelAll { #[arg(long)] coin: Option<String>, #[arg(short='y', long)] yes: bool },
     SetLeverage { coin: String, leverage: u32, #[arg(long)] isolated: bool, #[arg(long)] cross: bool },
